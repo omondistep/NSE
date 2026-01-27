@@ -156,7 +156,7 @@ class NSEStockValuator:
             # Clean data
             self._clean_data()
             
-            st.success(f"✅ Data loaded successfully!")
+            st.success("✅ Data loaded successfully!")
             st.info(f"📊 Price records: {len(self.price_data):,}")
             st.info(f"🏢 Companies loaded: {self.fundamentals['Symbol'].nunique()}")
             
@@ -757,7 +757,7 @@ def main():
                             # Show data info with source indicator
                             st.info(f"📊 Price records: {len(price_data):,}")
                             st.info(f"🏢 Companies loaded: {fundamentals['Symbol'].nunique()}")
-                            st.info(f"📂 Data source: Sample data (demo dataset)")
+                            st.info("📂 Data source: Sample data (demo dataset)")
                             
                             # Automatically run analysis
                             with st.spinner("Analyzing stocks..."):
@@ -791,7 +791,7 @@ def main():
                                 st.success("✅ Data loaded from data/ directory!")
                                 st.info(f"📊 Price records: {len(price_data):,}")
                                 st.info(f"🏢 Companies loaded: {fundamentals['Symbol'].nunique()}")
-                                st.info(f"📂 Data source: Sample data")
+                                st.info("📂 Data source: Sample data")
                                 
                                 with st.spinner("Analyzing stocks..."):
                                     results = st.session_state.valuator.analyze_all_stocks()
@@ -1276,7 +1276,7 @@ def main():
                             st.metric("P/E Ratio", "N/A")
                     with col4:
                         if 'Dividend_Yield' in stock_rec:
-                            st.metric("Dividend Yield", stock_rec['Dividend_Yield"])
+                            st.metric("Dividend Yield", stock_rec['Dividend_Yield'])
                     
                     # Charts
                     if stock_data is not None and not stock_data.empty:
