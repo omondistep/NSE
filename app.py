@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from io import BytesIO
 import os
+import sys
 
 warnings.filterwarnings('ignore')
 
@@ -555,6 +556,135 @@ def create_sample_data_structure():
     else:
         return False, sample_dir
 
+def generate_simple_sample_data():
+    """Generate simple sample data directly in the app (fallback option)"""
+    try:
+        import pandas as pd
+        import numpy as np
+        from datetime import datetime, timedelta
+        
+        st.info("Generating simple sample data...")
+        
+        # Create directories
+        os.makedirs('data/sample_data', exist_ok=True)
+        
+        # Create basic price data for 5 major stocks
+        dates = pd.date_range(start='2023-01-01', end='2023-12-31', freq='B')
+        symbols = ['SCOM', 'KCB', 'EQTY', 'EABL', 'COOP']
+        
+        price_data = []
+        for symbol in symbols:
+            if symbol == 'SCOM':
+                base_price = 15.0
+                volatility = 0.02
+            elif symbol == 'KCB':
+                base_price = 25.0
+                volatility = 0.03
+            elif symbol == 'EQTY':
+                base_price = 40.0
+                volatility = 0.025
+            elif symbol == 'EABL':
+                base_price = 130.0
+                volatility = 0.015
+            else:  # COOP
+                base_price = 12.5
+                volatility = 0.02
+            
+            for date in dates:
+                daily_change = np.random.normal(0, volatility)
+                base_price *= (1 + daily_change)
+                base_price = max(base_price, 0.01)
+                
+                open_price = base_price
+                high = open_price * (1 + abs(np.random.normal(0, volatility/2)))
+                low = open_price * (1 - abs(np.random.normal(0, volatility/2)))
+                close = open_price * (1 + np.random.normal(0, volatility/3))
+                
+                # Ensure high >= low
+                high = max(open_price, close, high)
+                low = min(open_price, close, low)
+                
+                volume = np.random.randint(10000, 1000000)
+                
+                price_data.append({
+                    'Date': date.strftime('%Y-%m-%d'),
+                    'Symbol': symbol,
+                    'Open': round(open_price, 2),
+                    'High': round(high, 2),
+                    'Low': round(low, 2),
+                    'Close': round(close, 2),
+                    'Volume': volume
+                })
+        
+        price_df = pd.DataFrame(price_data)
+        
+        # Create fundamentals data
+        fundamentals_data = [
+            {'Symbol': 'SCOM', 'Name': 'Safaricom Plc', 'Sector': 'TELECOMMUNICATION', 
+             'Market_Cap': 600000000000, 'Issued_Shares': 40065428000,
+             'PE_Ratio': 12.5, 'PB_Ratio': 4.2, 'Dividend_Yield': 5.8},
+            {'Symbol': 'KCB', 'Name': 'KCB Group Plc', 'Sector': 'BANKING', 
+             'Market_Cap': 150000000000, 'Issued_Shares': 3213462815,
+             'PE_Ratio': 8.2, 'PB_Ratio': 1.5, 'Dividend_Yield': 6.2},
+            {'Symbol': 'EQTY', 'Name': 'Equity Group Holdings Plc', 'Sector': 'BANKING', 
+             'Market_Cap': 180000000000, 'Issued_Shares': 3773674802,
+             'PE_Ratio': 9.1, 'PB_Ratio': 1.8, 'Dividend_Yield': 5.5},
+            {'Symbol': 'EABL', 'Name': 'East African Breweries Ltd', 'Sector': 'MANUFACTURING', 
+             'Market_Cap': 100000000000, 'Issued_Shares': 790774356,
+             'PE_Ratio': 14.2, 'PB_Ratio': 3.5, 'Dividend_Yield': 4.8},
+            {'Symbol': 'COOP', 'Name': 'Co-operative Bank of Kenya Ltd', 'Sector': 'BANKING', 
+             'Market_Cap': 80000000000, 'Issued_Shares': 5867174695,
+             'PE_Ratio': 7.5, 'PB_Ratio': 1.2, 'Dividend_Yield': 7.1}
+        ]
+        
+        fundamentals_df = pd.DataFrame(fundamentals_data)
+        
+        # Create financial data
+        financial_data = []
+        for symbol in symbols:
+            for year in [2020, 2021, 2022, 2023]:
+                if symbol == 'SCOM':
+                    revenue = 300000000000 + year * 20000000000
+                    net_income = revenue * 0.25
+                elif symbol == 'KCB':
+                    revenue = 120000000000 + year * 8000000000
+                    net_income = revenue * 0.22
+                elif symbol == 'EQTY':
+                    revenue = 100000000000 + year * 10000000000
+                    net_income = revenue * 0.24
+                elif symbol == 'EABL':
+                    revenue = 80000000000 + year * 5000000000
+                    net_income = revenue * 0.18
+                else:  # COOP
+                    revenue = 60000000000 + year * 4000000000
+                    net_income = revenue * 0.20
+                
+                financial_data.append({
+                    'Symbol': symbol,
+                    'Year': year,
+                    'Revenue': round(revenue, 2),
+                    'Net_Income': round(net_income, 2),
+                    'Total_Assets': round(revenue * 2.5, 2),
+                    'Total_Liabilities': round(revenue * 1.5, 2),
+                    'Shareholders_Equity': round(revenue * 1.0, 2),
+                    'EPS': round(net_income / fundamentals_df[fundamentals_df['Symbol'] == symbol]['Issued_Shares'].values[0], 4),
+                    'Dividends': round(net_income * 0.4 / fundamentals_df[fundamentals_df['Symbol'] == symbol]['Issued_Shares'].values[0], 4)
+                })
+        
+        financial_df = pd.DataFrame(financial_data)
+        
+        # Save files
+        price_df.to_csv('data/sample_data/nse_price_data.csv', index=False)
+        fundamentals_df.to_csv('data/sample_data/nse_fundamentals.csv', index=False)
+        financial_df.to_csv('data/sample_data/nse_financial_data.csv', index=False)
+        
+        return True, f"Generated {len(price_df):,} price records for {len(symbols)} companies"
+        
+    except ImportError as e:
+        return False, f"Missing package: {str(e)}"
+    except Exception as e:
+        return False, f"Error: {str(e)}"
+
 # Streamlit App
 def main():
     st.set_page_config(
@@ -681,7 +811,7 @@ def main():
                             
                             3. **OR** upload your own data files
                             
-                            4. **OR** run `python create_sample_data.py` to generate sample data
+                            4. **OR** click "Generate Sample Data" below
                             """)
                 except Exception as e:
                     st.error(f"❌ Error loading sample data: {str(e)}")
@@ -735,7 +865,7 @@ def main():
             created, sample_dir = create_sample_data_structure()
             if created:
                 st.success(f"✅ Created sample data directory: {sample_dir}")
-                st.info("📝 Run `python create_sample_data.py` to generate full sample data")
+                st.info("📝 Now click 'Generate Sample Data' to populate with data")
             else:
                 st.info(f"📁 Sample data directory already exists: {sample_dir}")
                 
@@ -754,29 +884,115 @@ def main():
                         st.write(f"  - {f}")
                 else:
                     st.warning("⚠️ No sample data files found in the directory")
-                    st.info("📝 Run `python create_sample_data.py` to generate full sample data")
+                    st.info("📝 Click 'Generate Sample Data' to create data files")
         
-        # Run sample data generation
+        # Run sample data generation - FIXED VERSION
         if st.button("🔄 Generate Sample Data", key="generate_sample_data"):
             try:
-                # Check if create_sample_data.py exists
-                if os.path.exists('create_sample_data.py'):
-                    import subprocess
-                    with st.spinner("Generating sample data..."):
-                        result = subprocess.run(['python', 'create_sample_data.py'], capture_output=True, text=True)
-                        if result.returncode == 0:
-                            st.success("✅ Sample data generated successfully!")
-                            st.code(result.stdout)
-                        else:
-                            st.error(f"❌ Error generating sample data:\n{result.stderr}")
-                else:
-                    st.error("""
-                    ❌ `create_sample_data.py` not found!
+                # First, check if required packages are available
+                try:
+                    import pandas as pd
+                    import numpy as np
+                    packages_available = True
+                except ImportError as e:
+                    packages_available = False
+                    missing_package = str(e).split("'")[1] if "'" in str(e) else "unknown"
+                
+                if not packages_available:
+                    st.error(f"""
+                    ❌ Missing required package: `{missing_package}`
                     
-                    Please ensure you have the `create_sample_data.py` script in the same directory as `app.py`.
+                    Please install required packages first:
+                    ```bash
+                    pip install pandas numpy
+                    ```
+                    
+                    Then restart the application.
                     """)
+                    return
+                
+                # Try to use the external script first
+                if os.path.exists('create_sample_data.py'):
+                    try:
+                        with st.spinner("Generating comprehensive sample data..."):
+                            # Import the module
+                            import importlib.util
+                            import sys
+                            
+                            # Check if module is already loaded
+                            if 'create_sample_data' in sys.modules:
+                                del sys.modules['create_sample_data']
+                            
+                            # Load and run the module
+                            spec = importlib.util.spec_from_file_location("create_sample_data", "create_sample_data.py")
+                            module = importlib.util.module_from_spec(spec)
+                            
+                            # Capture output
+                            import io
+                            from contextlib import redirect_stdout, redirect_stderr
+                            
+                            output = io.StringIO()
+                            with redirect_stdout(output), redirect_stderr(output):
+                                try:
+                                    spec.loader.exec_module(module)
+                                    # Check if module has a main function
+                                    if hasattr(module, 'main'):
+                                        module.main()
+                                    elif hasattr(module, 'generate_sample_data'):
+                                        module.generate_sample_data()
+                                    else:
+                                        # Assume the script runs on import
+                                        pass
+                                except Exception as module_error:
+                                    st.error(f"❌ Error in sample data script: {str(module_error)}")
+                                    # Fall back to simple data generation
+                                    success, message = generate_simple_sample_data()
+                                    if success:
+                                        st.success(f"✅ {message}")
+                                    else:
+                                        st.error(f"❌ {message}")
+                                    return
+                            
+                            # Show output
+                            output_text = output.getvalue()
+                            if output_text:
+                                st.success("✅ Sample data generated successfully!")
+                                st.code(output_text[:1000] + "..." if len(output_text) > 1000 else output_text)
+                            else:
+                                st.success("✅ Sample data generated successfully!")
+                                
+                            # Show generated files
+                            if os.path.exists('data/sample_data'):
+                                files = os.listdir('data/sample_data')
+                                if files:
+                                    st.info(f"📁 Generated {len(files)} files in data/sample_data/")
+                                    for file in files:
+                                        filepath = os.path.join('data/sample_data', file)
+                                        size = os.path.getsize(filepath)
+                                        st.write(f"  - {file} ({size:,} bytes)")
+                            
+                    except Exception as e:
+                        st.error(f"❌ Error running sample data script: {str(e)}")
+                        st.info("Trying simple data generation...")
+                        
+                        # Fall back to simple data generation
+                        success, message = generate_simple_sample_data()
+                        if success:
+                            st.success(f"✅ {message}")
+                        else:
+                            st.error(f"❌ {message}")
+                
+                else:
+                    # No external script, use the built-in function
+                    st.info("No external create_sample_data.py found. Using built-in data generator...")
+                    success, message = generate_simple_sample_data()
+                    if success:
+                        st.success(f"✅ {message}")
+                    else:
+                        st.error(f"❌ {message}")
+                        
             except Exception as e:
-                st.error(f"❌ Error running sample data generation: {str(e)}")
+                st.error(f"❌ Error generating sample data: {str(e)}")
         
         st.markdown("---")
         st.header("🔄 Data Management")
@@ -854,7 +1070,7 @@ def main():
             if os.path.exists('create_sample_data.py'):
                 st.success("✅ Sample data script available")
             else:
-                st.warning("⚠️ Sample data script not found")
+                st.info("ℹ️ No external sample data script found (built-in generator available)")
         
         st.markdown("---")
         st.warning("""
@@ -1060,7 +1276,7 @@ def main():
                             st.metric("P/E Ratio", "N/A")
                     with col4:
                         if 'Dividend_Yield' in stock_rec:
-                            st.metric("Dividend Yield", stock_rec['Dividend_Yield'])
+                            st.metric("Dividend Yield", stock_rec['Dividend_Yield"])
                     
                     # Charts
                     if stock_data is not None and not stock_data.empty:
