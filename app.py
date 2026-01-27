@@ -322,7 +322,8 @@ class NSEStockValuator:
                 'PE_Ratio': 0,
                 'Dividend_Yield': '0%',
                 'DCF_Value': 0,
-                'Upside_Potential': 'N/A'
+                'Upside_Potential': 'N/A',
+                'Sector': self.get_sector(symbol)
             }
         
         score = 0
@@ -446,6 +447,16 @@ class NSEStockValuator:
         results_df = pd.DataFrame(results)
         
         if not results_df.empty:
+            # Clean the Sector column to ensure it's all strings
+            if 'Sector' in results_df.columns:
+                results_df['Sector'] = results_df['Sector'].astype(str).str.strip()
+                # Replace any remaining float-like strings
+                results_df['Sector'] = results_df['Sector'].replace({
+                    'nan': 'UNCLASSIFIED',
+                    'NaN': 'UNCLASSIFIED',
+                    'None': 'UNCLASSIFIED'
+                })
+            
             # Sort by recommendation score
             results_df = results_df.sort_values('Score', ascending=False)
         
@@ -473,6 +484,7 @@ class NSEStockValuator:
             # Summary sheet
             summary_cols = ['Symbol', 'Name', 'Sector', 'Recommendation', 'Current_Price', 
                           'PE_Ratio', 'Dividend_Yield', 'Upside_Potential', 'Score']
+            summary_cols = [col for col in summary_cols if col in results_df.columns]
             results_df[summary_cols].to_excel(writer, sheet_name='Summary', index=False)
             
             # Detailed analysis sheet
@@ -491,24 +503,33 @@ class NSEStockValuator:
     
     def analyze_by_sector(self, results_df):
         """Analyze performance by sector"""
-        if results_df.empty:
+        if results_df.empty or 'Sector' not in results_df.columns:
             return pd.DataFrame()
         
         sector_data = []
-        for sector in self.sector_classification.keys():
-            sector_symbols = self.sector_classification[sector]
-            sector_results = results_df[results_df['Symbol'].isin(sector_symbols)]
+        
+        # First, ensure all sectors are strings
+        results_df['Sector'] = results_df['Sector'].astype(str).str.strip()
+        
+        for sector in results_df['Sector'].unique():
+            if pd.isna(sector) or sector == 'nan' or sector == 'NaN':
+                continue
+                
+            sector_results = results_df[results_df['Sector'] == sector]
             
             if not sector_results.empty:
                 avg_score = sector_results['Score'].mean()
                 buy_percentage = len(sector_results[sector_results['Recommendation'].isin(['BUY', 'STRONG_BUY'])]) / len(sector_results) * 100
+                
+                # Get top stock in this sector
+                top_stock = sector_results.iloc[0]['Symbol'] if len(sector_results) > 0 else 'N/A'
                 
                 sector_data.append({
                     'Sector': sector,
                     'Number_of_Stocks': len(sector_results),
                     'Average_Score': avg_score,
                     'Buy_Recommendation_Percentage': f"{buy_percentage:.1f}%",
-                    'Top_Stock': sector_results.iloc[0]['Symbol'] if len(sector_results) > 0 else 'N/A'
+                    'Top_Stock': top_stock
                 })
         
         return pd.DataFrame(sector_data).sort_values('Average_Score', ascending=False)
@@ -548,6 +569,10 @@ def main():
                         financial_data = pd.read_csv('data/nse_financial_data.csv')
                         fundamentals = pd.read_csv('data/nse_fundamentals.csv')
                         
+                        # Clean the fundamentals data - ensure Sector column is string
+                        if 'Sector' in fundamentals.columns:
+                            fundamentals['Sector'] = fundamentals['Sector'].astype(str).str.strip()
+                        
                         # Create temporary files for loading
                         price_path = "temp_price.csv"
                         financial_path = "temp_financial.csv"
@@ -571,6 +596,12 @@ def main():
                         if success:
                             st.session_state.data_loaded = True
                             st.success("✅ Data loaded from data/ directory!")
+                            
+                            # Automatically run analysis
+                            with st.spinner("Analyzing stocks..."):
+                                results = st.session_state.valuator.analyze_all_stocks()
+                                st.session_state.analysis_results = results
+                                st.success("✅ Analysis complete!")
                 else:
                     st.error("❌ Data files not found in data/ directory")
             except Exception as e:
@@ -709,20 +740,58 @@ def main():
                 # Filter options
                 col_filter1, col_filter2, col_filter3 = st.columns(3)
                 with col_filter1:
-                    filter_recommendation = st.multiselect(
-                        "Filter by Recommendation",
-                        options=['STRONG_BUY', 'BUY', 'HOLD', 'SELL', 'STRONG_SELL'],
-                        default=['STRONG_BUY', 'BUY']
-                    )
+                    # Ensure Recommendation column exists
+                    if 'Recommendation' in results_df.columns:
+                        rec_options = results_df['Recommendation'].unique()
+                        
+                        # Create default values based on available options
+                        default_values = []
+                        if 'STRONG_BUY' in rec_options:
+                            default_values.append('STRONG_BUY')
+                        if 'BUY' in rec_options:
+                            default_values.append('BUY')
+                        # If no BUY recommendations, default to first available option
+                        if not default_values and len(rec_options) > 0:
+                            default_values = [rec_options[0]]
+                        
+                        filter_recommendation = st.multiselect(
+                            "Filter by Recommendation",
+                            options=list(rec_options),
+                            default=default_values
+                        )
+                    else:
+                        filter_recommendation = []
+                
                 with col_filter2:
-                    filter_sector = st.multiselect(
-                        "Filter by Sector",
-                        options=sorted(results_df['Sector'].unique()) if 'Sector' in results_df.columns else [],
-                        default=[]
-                    )
+                    # Clean Sector column before displaying options
+                    if 'Sector' in results_df.columns:
+                        # Ensure Sector column is clean string
+                        results_df['Sector'] = results_df['Sector'].astype(str).str.strip()
+                        sector_options = sorted(results_df['Sector'].unique())
+                        filter_sector = st.multiselect(
+                            "Filter by Sector",
+                            options=sector_options,
+                            default=[]
+                        )
+                    else:
+                        filter_sector = []
+                
                 with col_filter3:
-                    min_price = st.number_input("Min Price (KES)", value=0.0, step=1.0)
-                    max_price = st.number_input("Max Price (KES)", value=1000.0, step=10.0)
+                    if 'Current_Price' in results_df.columns:
+                        min_price_val = results_df['Current_Price'].min()
+                        max_price_val = results_df['Current_Price'].max()
+                        min_price = st.number_input("Min Price (KES)", 
+                                                   value=float(min_price_val), 
+                                                   min_value=0.0, 
+                                                   step=0.1)
+                        max_price = st.number_input("Max Price (KES)", 
+                                                   value=float(max_price_val), 
+                                                   min_value=0.0, 
+                                                   step=0.1)
+                    else:
+                        min_price = 0.0
+                        max_price = 1000.0
+                        st.warning("Current Price data not available")
                 
                 # Apply filters
                 filtered_df = results_df.copy()
@@ -730,10 +799,11 @@ def main():
                     filtered_df = filtered_df[filtered_df['Recommendation'].isin(filter_recommendation)]
                 if filter_sector:
                     filtered_df = filtered_df[filtered_df['Sector'].isin(filter_sector)]
-                filtered_df = filtered_df[
-                    (filtered_df['Current_Price'] >= min_price) & 
-                    (filtered_df['Current_Price'] <= max_price)
-                ]
+                if 'Current_Price' in filtered_df.columns:
+                    filtered_df = filtered_df[
+                        (filtered_df['Current_Price'] >= min_price) & 
+                        (filtered_df['Current_Price'] <= max_price)
+                    ]
                 
                 # Display table
                 display_cols = ['Symbol', 'Name', 'Sector', 'Recommendation', 'Current_Price', 
@@ -742,31 +812,42 @@ def main():
                 # Ensure all columns exist
                 display_cols = [col for col in display_cols if col in filtered_df.columns]
                 
-                st.dataframe(
-                    filtered_df[display_cols].style.applymap(
-                        color_recommendation, subset=['Recommendation']
-                    ),
-                    use_container_width=True,
-                    height=400
-                )
-                
-                # Top picks
-                st.subheader("🎯 Top Investment Picks")
-                top_picks = filtered_df.head(5)
-                
-                for idx, row in top_picks.iterrows():
-                    with st.expander(f"{row['Symbol']} - {row['Name']} ({row['Recommendation']})"):
-                        col_a, col_b = st.columns(2)
-                        with col_a:
-                            st.metric("Current Price", f"KES {row['Current_Price']:.2f}")
-                            st.metric("P/E Ratio", f"{row['PE_Ratio']:.2f}" if not pd.isna(row['PE_Ratio']) else "N/A")
-                        with col_b:
-                            st.metric("Dividend Yield", row['Dividend_Yield'])
-                            st.metric("Upside Potential", row['Upside_Potential'])
-                        
-                        st.write("**Analysis Reasons:**")
-                        for reason in row['Reasons']:
-                            st.write(f"• {reason}")
+                if not filtered_df.empty:
+                    st.dataframe(
+                        filtered_df[display_cols].style.applymap(
+                            color_recommendation, subset=['Recommendation']
+                        ),
+                        use_container_width=True,
+                        height=400
+                    )
+                    
+                    # Top picks
+                    st.subheader("🎯 Top Investment Picks")
+                    top_picks = filtered_df.head(5)
+                    
+                    for idx, row in top_picks.iterrows():
+                        with st.expander(f"{row['Symbol']} - {row['Name']} ({row['Recommendation']})"):
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                st.metric("Current Price", f"KES {row['Current_Price']:.2f}")
+                                if 'PE_Ratio' in row and not pd.isna(row['PE_Ratio']):
+                                    st.metric("P/E Ratio", f"{row['PE_Ratio']:.2f}")
+                                else:
+                                    st.metric("P/E Ratio", "N/A")
+                            with col_b:
+                                if 'Dividend_Yield' in row:
+                                    st.metric("Dividend Yield", row['Dividend_Yield'])
+                                if 'Upside_Potential' in row:
+                                    st.metric("Upside Potential", row['Upside_Potential'])
+                            
+                            st.write("**Analysis Reasons:**")
+                            if 'Reasons' in row and isinstance(row['Reasons'], list):
+                                for reason in row['Reasons']:
+                                    st.write(f"• {reason}")
+                            elif 'Reasons' in row:
+                                st.write(f"• {row['Reasons']}")
+                else:
+                    st.warning("No data matches the selected filters")
             else:
                 st.warning("No analysis results available. Please load and analyze data first.")
         
@@ -775,26 +856,37 @@ def main():
             
             if results_df is not None and not results_df.empty:
                 # Stock selector
-                selected_symbol = st.selectbox(
+                stock_options = []
+                for symbol in results_df['Symbol'].unique():
+                    name = results_df[results_df['Symbol'] == symbol]['Name'].iloc[0] if 'Name' in results_df.columns else symbol
+                    stock_options.append(f"{symbol} - {name}")
+                
+                selected_stock = st.selectbox(
                     "Select a Stock",
-                    options=results_df['Symbol'].tolist(),
-                    format_func=lambda x: f"{x} - {results_df[results_df['Symbol'] == x]['Name'].iloc[0]}"
+                    options=stock_options
                 )
                 
-                if selected_symbol:
+                if selected_stock:
+                    selected_symbol = selected_stock.split(" - ")[0]
                     stock_data = st.session_state.valuator.calculate_technical_indicators(selected_symbol)
                     stock_rec = results_df[results_df['Symbol'] == selected_symbol].iloc[0]
                     
                     # Stock overview
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
-                        st.metric("Current Price", f"KES {stock_rec['Current_Price']:.2f}")
+                        if 'Current_Price' in stock_rec:
+                            st.metric("Current Price", f"KES {stock_rec['Current_Price']:.2f}")
                     with col2:
-                        st.metric("Recommendation", stock_rec['Recommendation'])
+                        if 'Recommendation' in stock_rec:
+                            st.metric("Recommendation", stock_rec['Recommendation'])
                     with col3:
-                        st.metric("P/E Ratio", f"{stock_rec['PE_Ratio']:.2f}" if not pd.isna(stock_rec['PE_Ratio']) else "N/A")
+                        if 'PE_Ratio' in stock_rec and not pd.isna(stock_rec['PE_Ratio']):
+                            st.metric("P/E Ratio", f"{stock_rec['PE_Ratio']:.2f}")
+                        else:
+                            st.metric("P/E Ratio", "N/A")
                     with col4:
-                        st.metric("Dividend Yield", stock_rec['Dividend_Yield'])
+                        if 'Dividend_Yield' in stock_rec:
+                            st.metric("Dividend Yield", stock_rec['Dividend_Yield'])
                     
                     # Charts
                     if stock_data is not None and not stock_data.empty:
@@ -858,26 +950,29 @@ def main():
                     
                     with col_analysis1:
                         st.markdown("**Valuation Metrics:**")
-                        st.write(f"- **P/E Ratio:** {stock_rec['PE_Ratio']:.2f}" if not pd.isna(stock_rec['PE_Ratio']) else "- **P/E Ratio:** N/A")
-                        st.write(f"- **Dividend Yield:** {stock_rec['Dividend_Yield']}")
-                        if 'PB_Ratio' in stock_rec and not pd.isna(stock_rec.get('PB_Ratio')):
-                            st.write(f"- **P/B Ratio:** {stock_rec['PB_Ratio']:.2f}")
-                        
-                        if stock_rec['DCF_Value'] and stock_rec['DCF_Value'] > 0:
+                        if 'PE_Ratio' in stock_rec and not pd.isna(stock_rec['PE_Ratio']):
+                            st.write(f"- **P/E Ratio:** {stock_rec['PE_Ratio']:.2f}")
+                        if 'Dividend_Yield' in stock_rec:
+                            st.write(f"- **Dividend Yield:** {stock_rec['Dividend_Yield']}")
+                        if 'DCF_Value' in stock_rec and stock_rec['DCF_Value'] and stock_rec['DCF_Value'] > 0:
                             st.write(f"- **DCF Intrinsic Value:** KES {stock_rec['DCF_Value']:.2f}")
+                        if 'Upside_Potential' in stock_rec:
                             st.write(f"- **Margin of Safety:** {stock_rec['Upside_Potential']}")
                     
                     with col_analysis2:
                         st.markdown("**Recommendation Reasons:**")
-                        for reason in stock_rec['Reasons']:
-                            st.write(f"• {reason}")
+                        if 'Reasons' in stock_rec and isinstance(stock_rec['Reasons'], list):
+                            for reason in stock_rec['Reasons']:
+                                st.write(f"• {reason}")
+                        elif 'Reasons' in stock_rec:
+                            st.write(f"• {stock_rec['Reasons']}")
                     
                     # Risk Assessment
                     st.subheader("Risk Assessment")
-                    risk_score = -stock_rec['Score'] if stock_rec['Score'] < 0 else 10 - stock_rec['Score']
-                    risk_level = "Low" if risk_score <= 3 else "Medium" if risk_score <= 6 else "High"
-                    
-                    st.progress(risk_score / 10, text=f"Risk Level: {risk_level} ({risk_score}/10)")
+                    if 'Score' in stock_rec:
+                        risk_score = -stock_rec['Score'] if stock_rec['Score'] < 0 else 10 - stock_rec['Score']
+                        risk_level = "Low" if risk_score <= 3 else "Medium" if risk_score <= 6 else "High"
+                        st.progress(min(risk_score / 10, 1.0), text=f"Risk Level: {risk_level} ({risk_score}/10)")
             else:
                 st.warning("No stock data available. Please analyze stocks first.")
         
@@ -885,6 +980,9 @@ def main():
             st.header("Sector Analysis")
             
             if results_df is not None and not results_df.empty:
+                # Ensure Sector column is clean
+                results_df['Sector'] = results_df['Sector'].astype(str).str.strip()
+                
                 sector_analysis = st.session_state.valuator.analyze_by_sector(results_df)
                 
                 if not sector_analysis.empty:
@@ -915,12 +1013,9 @@ def main():
                     fig_sector.update_layout(height=500)
                     st.plotly_chart(fig_sector, use_container_width=True)
                     
-                    # Sector details table
+                    # Sector details table - FIXED: Removed background_gradient
                     st.dataframe(
-                        sector_analysis.style.background_gradient(
-                            subset=['Average_Score'], 
-                            cmap='RdYlGn'
-                        ),
+                        sector_analysis,
                         use_container_width=True
                     )
                     
@@ -954,79 +1049,99 @@ def main():
                 )
                 
                 if chart_type == "Recommendation Distribution":
-                    rec_counts = results_df['Recommendation'].value_counts()
-                    fig_dist = px.pie(
-                        values=rec_counts.values,
-                        names=rec_counts.index,
-                        title="Recommendation Distribution",
-                        color=rec_counts.index,
-                        color_discrete_map={
-                            'STRONG_BUY': '#2E7D32',
-                            'BUY': '#4CAF50',
-                            'HOLD': '#FFC107',
-                            'SELL': '#FF9800',
-                            'STRONG_SELL': '#F44336'
-                        }
-                    )
-                    st.plotly_chart(fig_dist, use_container_width=True)
+                    if 'Recommendation' in results_df.columns:
+                        rec_counts = results_df['Recommendation'].value_counts()
+                        fig_dist = px.pie(
+                            values=rec_counts.values,
+                            names=rec_counts.index,
+                            title="Recommendation Distribution",
+                            color=rec_counts.index,
+                            color_discrete_map={
+                                'STRONG_BUY': '#2E7D32',
+                                'BUY': '#4CAF50',
+                                'HOLD': '#FFC107',
+                                'SELL': '#FF9800',
+                                'STRONG_SELL': '#F44336'
+                            }
+                        )
+                        st.plotly_chart(fig_dist, use_container_width=True)
+                    else:
+                        st.warning("Recommendation data not available")
                 
                 elif chart_type == "Price vs P/E Ratio":
-                    fig_scatter = px.scatter(
-                        results_df,
-                        x='PE_Ratio',
-                        y='Current_Price',
-                        color='Recommendation',
-                        size='Score',
-                        hover_name='Symbol',
-                        title="Price vs P/E Ratio Analysis",
-                        labels={'PE_Ratio': 'P/E Ratio', 'Current_Price': 'Current Price (KES)'},
-                        color_discrete_map={
-                            'STRONG_BUY': '#2E7D32',
-                            'BUY': '#4CAF50',
-                            'HOLD': '#FFC107',
-                            'SELL': '#FF9800',
-                            'STRONG_SELL': '#F44336'
-                        }
-                    )
-                    st.plotly_chart(fig_scatter, use_container_width=True)
+                    if 'PE_Ratio' in results_df.columns and 'Current_Price' in results_df.columns and 'Recommendation' in results_df.columns:
+                        # Filter out NaN values
+                        chart_data = results_df.dropna(subset=['PE_Ratio', 'Current_Price'])
+                        fig_scatter = px.scatter(
+                            chart_data,
+                            x='PE_Ratio',
+                            y='Current_Price',
+                            color='Recommendation',
+                            size='Score' if 'Score' in chart_data.columns else None,
+                            hover_name='Symbol',
+                            title="Price vs P/E Ratio Analysis",
+                            labels={'PE_Ratio': 'P/E Ratio', 'Current_Price': 'Current Price (KES)'},
+                            color_discrete_map={
+                                'STRONG_BUY': '#2E7D32',
+                                'BUY': '#4CAF50',
+                                'HOLD': '#FFC107',
+                                'SELL': '#FF9800',
+                                'STRONG_SELL': '#F44336'
+                            }
+                        )
+                        st.plotly_chart(fig_scatter, use_container_width=True)
+                    else:
+                        st.warning("Required data columns not available")
                 
                 elif chart_type == "Dividend Yield Heatmap":
                     # Prepare data for heatmap
-                    heatmap_data = results_df.pivot_table(
-                        values='Dividend_Yield',
-                        index='Sector',
-                        columns='Recommendation',
-                        aggfunc='mean',
-                        fill_value=0
-                    )
-                    
-                    fig_heatmap = px.imshow(
-                        heatmap_data,
-                        title="Average Dividend Yield by Sector and Recommendation",
-                        labels=dict(x="Recommendation", y="Sector", color="Dividend Yield (%)"),
-                        aspect="auto",
-                        color_continuous_scale="YlOrRd"
-                    )
-                    st.plotly_chart(fig_heatmap, use_container_width=True)
+                    if 'Dividend_Yield' in results_df.columns and 'Sector' in results_df.columns and 'Recommendation' in results_df.columns:
+                        # Clean the Dividend_Yield column
+                        results_df['Dividend_Yield_Clean'] = results_df['Dividend_Yield'].astype(str).str.replace('%', '').astype(float)
+                        
+                        heatmap_data = results_df.pivot_table(
+                            values='Dividend_Yield_Clean',
+                            index='Sector',
+                            columns='Recommendation',
+                            aggfunc='mean',
+                            fill_value=0
+                        )
+                        
+                        if not heatmap_data.empty:
+                            fig_heatmap = px.imshow(
+                                heatmap_data,
+                                title="Average Dividend Yield by Sector and Recommendation",
+                                labels=dict(x="Recommendation", y="Sector", color="Dividend Yield (%)"),
+                                aspect="auto",
+                                color_continuous_scale="YlOrRd"
+                            )
+                            st.plotly_chart(fig_heatmap, use_container_width=True)
+                        else:
+                            st.warning("No data available for heatmap")
+                    else:
+                        st.warning("Required data columns not available")
                 
                 elif chart_type == "Sector Performance":
-                    sector_perf = results_df.groupby('Sector').agg({
-                        'Score': 'mean',
-                        'Current_Price': 'mean',
-                        'Symbol': 'count'
-                    }).reset_index()
-                    
-                    fig_sector_perf = px.scatter(
-                        sector_perf,
-                        x='Current_Price',
-                        y='Score',
-                        size='Symbol',
-                        color='Sector',
-                        hover_name='Sector',
-                        title="Sector Performance: Average Score vs Average Price",
-                        labels={'Current_Price': 'Average Price (KES)', 'Score': 'Average Score'}
-                    )
-                    st.plotly_chart(fig_sector_perf, use_container_width=True)
+                    if 'Sector' in results_df.columns and 'Score' in results_df.columns and 'Current_Price' in results_df.columns:
+                        sector_perf = results_df.groupby('Sector').agg({
+                            'Score': 'mean',
+                            'Current_Price': 'mean',
+                            'Symbol': 'count'
+                        }).reset_index()
+                        
+                        fig_sector_perf = px.scatter(
+                            sector_perf,
+                            x='Current_Price',
+                            y='Score',
+                            size='Symbol',
+                            color='Sector',
+                            hover_name='Sector',
+                            title="Sector Performance: Average Score vs Average Price",
+                            labels={'Current_Price': 'Average Price (KES)', 'Score': 'Average Score'}
+                        )
+                        st.plotly_chart(fig_sector_perf, use_container_width=True)
+                    else:
+                        st.warning("Required data columns not available")
             else:
                 st.warning("No data available for charts.")
         
@@ -1047,7 +1162,6 @@ def main():
                 
                 with col_export2:
                     include_details = st.checkbox("Include Detailed Analysis", value=True)
-                    include_charts = st.checkbox("Include Charts (Excel only)", value=True)
                 
                 # Generate export
                 if st.button("📥 Generate Export"):
@@ -1063,7 +1177,13 @@ def main():
                                 )
                         
                         elif export_format == "CSV Summary":
-                            csv_data = results_df.to_csv(index=False)
+                            # Clean the data before exporting
+                            export_df = results_df.copy()
+                            if 'Reasons' in export_df.columns:
+                                export_df['Reasons'] = export_df['Reasons'].apply(
+                                    lambda x: '; '.join(x) if isinstance(x, list) else str(x)
+                                )
+                            csv_data = export_df.to_csv(index=False)
                             st.download_button(
                                 label="⬇️ Download CSV Summary",
                                 data=csv_data,
@@ -1072,7 +1192,13 @@ def main():
                             )
                         
                         elif export_format == "JSON Data":
-                            json_data = results_df.to_json(orient='records', indent=2)
+                            # Clean the data before exporting
+                            export_df = results_df.copy()
+                            if 'Reasons' in export_df.columns:
+                                export_df['Reasons'] = export_df['Reasons'].apply(
+                                    lambda x: x if isinstance(x, list) else [str(x)]
+                                )
+                            json_data = export_df.to_json(orient='records', indent=2)
                             st.download_button(
                                 label="⬇️ Download JSON Data",
                                 data=json_data,
@@ -1082,7 +1208,13 @@ def main():
                 
                 # Preview data
                 st.subheader("Data Preview")
-                st.dataframe(results_df.head(10), use_container_width=True)
+                preview_df = results_df.head(10).copy()
+                # Clean Reasons column for display
+                if 'Reasons' in preview_df.columns:
+                    preview_df['Reasons'] = preview_df['Reasons'].apply(
+                        lambda x: '; '.join(x) if isinstance(x, list) else str(x)
+                    )
+                st.dataframe(preview_df, use_container_width=True)
                 
                 # Data statistics
                 st.subheader("Data Statistics")
@@ -1090,10 +1222,17 @@ def main():
                 with col_stat1:
                     st.metric("Total Records", len(results_df))
                 with col_stat2:
-                    st.metric("Average P/E Ratio", 
-                             f"{results_df['PE_Ratio'].mean():.2f}" if 'PE_Ratio' in results_df.columns else "N/A")
+                    if 'PE_Ratio' in results_df.columns:
+                        avg_pe = results_df['PE_Ratio'].mean()
+                        st.metric("Average P/E Ratio", f"{avg_pe:.2f}" if not pd.isna(avg_pe) else "N/A")
+                    else:
+                        st.metric("Average P/E Ratio", "N/A")
                 with col_stat3:
-                    st.metric("Average Score", f"{results_df['Score'].mean():.2f}")
+                    if 'Score' in results_df.columns:
+                        avg_score = results_df['Score'].mean()
+                        st.metric("Average Score", f"{avg_score:.2f}")
+                    else:
+                        st.metric("Average Score", "N/A")
                 
             else:
                 st.warning("No data available for export.")
