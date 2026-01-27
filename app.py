@@ -1,4 +1,4 @@
-# app.py
+# app.py - Complete Fixed Version
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -125,6 +125,9 @@ class NSEStockValuator:
     def __init__(self):
         self.nse_symbols = COMPLETE_NSE_SYMBOLS
         self.sector_classification = SECTOR_CLASSIFICATION
+        self.price_data = None
+        self.financial_data = None
+        self.fundamentals = None
         
     def load_data(self, price_file, financial_file, fundamentals_file):
         """Load data from uploaded files"""
@@ -534,6 +537,24 @@ class NSEStockValuator:
         
         return pd.DataFrame(sector_data).sort_values('Average_Score', ascending=False)
 
+def create_sample_data_structure():
+    """Create the sample data directory structure"""
+    sample_dir = 'data/sample_data'
+    
+    if not os.path.exists(sample_dir):
+        os.makedirs(sample_dir, exist_ok=True)
+        
+        # Create empty placeholder files
+        placeholder_df = pd.DataFrame({'Note': ['Placeholder for sample data - run create_sample_data.py to generate full data']})
+        
+        for filename in ['nse_price_data.csv', 'nse_financial_data.csv', 'nse_fundamentals.csv']:
+            filepath = os.path.join(sample_dir, filename)
+            placeholder_df.to_csv(filepath, index=False)
+        
+        return True, sample_dir
+    else:
+        return False, sample_dir
+
 # Streamlit App
 def main():
     st.set_page_config(
@@ -552,65 +573,129 @@ def main():
         st.session_state.data_loaded = False
     if 'analysis_results' not in st.session_state:
         st.session_state.analysis_results = None
+    if 'data_source' not in st.session_state:  # Track data source
+        st.session_state.data_source = None  # 'sample', 'uploaded', or None
     
     # Sidebar
     with st.sidebar:
-        st.header("📂 Data Configuration")
+        st.header("📂 Load Data")
         
-        # Option 1: Use pre-loaded data from data/ directory
-        if st.button("📁 Use Sample Data from data/ directory"):
-            try:
-                if os.path.exists('data/nse_price_data.csv') and \
-                   os.path.exists('data/nse_financial_data.csv') and \
-                   os.path.exists('data/nse_fundamentals.csv'):
+        # Create two columns for data loading options
+        col_sample, col_upload = st.columns(2)
+        
+        with col_sample:
+            st.subheader("🎯 Try Sample Data")
+            st.markdown("""
+            Load pre-configured sample data to test the app.
+            Files should be in `data/sample_data/` directory.
+            """)
+            
+            if st.button("📁 Load Sample Data", key="load_sample", use_container_width=True):
+                try:
+                    # Define sample data paths
+                    sample_data_dir = 'data/sample_data'
+                    price_path = os.path.join(sample_data_dir, 'nse_price_data.csv')
+                    financial_path = os.path.join(sample_data_dir, 'nse_financial_data.csv')
+                    fundamentals_path = os.path.join(sample_data_dir, 'nse_fundamentals.csv')
                     
-                    with st.spinner("Loading data from data/ directory..."):
-                        price_data = pd.read_csv('data/nse_price_data.csv')
-                        financial_data = pd.read_csv('data/nse_financial_data.csv')
-                        fundamentals = pd.read_csv('data/nse_fundamentals.csv')
+                    if os.path.exists(price_path) and os.path.exists(financial_path) and os.path.exists(fundamentals_path):
                         
-                        # Clean the fundamentals data - ensure Sector column is string
-                        if 'Sector' in fundamentals.columns:
-                            fundamentals['Sector'] = fundamentals['Sector'].astype(str).str.strip()
-                        
-                        # Create temporary files for loading
-                        price_path = "temp_price.csv"
-                        financial_path = "temp_financial.csv"
-                        fundamentals_path = "temp_fundamentals.csv"
-                        
-                        price_data.to_csv(price_path, index=False)
-                        financial_data.to_csv(financial_path, index=False)
-                        fundamentals.to_csv(fundamentals_path, index=False)
-                        
-                        # Load using file objects
-                        class FileObject:
-                            def __init__(self, path):
-                                self.name = path
-                        
-                        success = st.session_state.valuator.load_data(
-                            FileObject(price_path),
-                            FileObject(financial_path),
-                            FileObject(fundamentals_path)
-                        )
-                        
-                        if success:
+                        with st.spinner("Loading sample data..."):
+                            # Read the sample data
+                            price_data = pd.read_csv(price_path)
+                            financial_data = pd.read_csv(financial_path)
+                            fundamentals = pd.read_csv(fundamentals_path)
+                            
+                            # Clean the fundamentals data - ensure Sector column is string
+                            if 'Sector' in fundamentals.columns:
+                                fundamentals['Sector'] = fundamentals['Sector'].astype(str).str.strip()
+                            
+                            # Store the data source
+                            st.session_state.data_source = 'sample'
+                            
+                            # Store the data directly in the valuator
+                            st.session_state.valuator.price_data = price_data
+                            st.session_state.valuator.financial_data = financial_data
+                            st.session_state.valuator.fundamentals = fundamentals
+                            
+                            # Clean the data
+                            st.session_state.valuator._clean_data()
+                            
                             st.session_state.data_loaded = True
-                            st.success("✅ Data loaded from data/ directory!")
+                            st.success("✅ Sample data loaded successfully!")
+                            
+                            # Show data info with source indicator
+                            st.info(f"📊 Price records: {len(price_data):,}")
+                            st.info(f"🏢 Companies loaded: {fundamentals['Symbol'].nunique()}")
+                            st.info(f"📂 Data source: Sample data (demo dataset)")
                             
                             # Automatically run analysis
                             with st.spinner("Analyzing stocks..."):
                                 results = st.session_state.valuator.analyze_all_stocks()
                                 st.session_state.analysis_results = results
                                 st.success("✅ Analysis complete!")
-                else:
-                    st.error("❌ Data files not found in data/ directory")
-            except Exception as e:
-                st.error(f"❌ Error loading data: {str(e)}")
+                    else:
+                        # If sample_data directory doesn't exist, check the root data directory as fallback
+                        fallback_price = 'data/nse_price_data.csv'
+                        fallback_financial = 'data/nse_financial_data.csv'
+                        fallback_fundamentals = 'data/nse_fundamentals.csv'
+                        
+                        if os.path.exists(fallback_price) and os.path.exists(fallback_financial) and os.path.exists(fallback_fundamentals):
+                            st.warning("⚠️ Sample data not found in 'data/sample_data/' directory, but found in 'data/' directory. Using those files.")
+                            
+                            with st.spinner("Loading data from data/ directory..."):
+                                price_data = pd.read_csv(fallback_price)
+                                financial_data = pd.read_csv(fallback_financial)
+                                fundamentals = pd.read_csv(fallback_fundamentals)
+                                
+                                if 'Sector' in fundamentals.columns:
+                                    fundamentals['Sector'] = fundamentals['Sector'].astype(str).str.strip()
+                                
+                                st.session_state.data_source = 'sample'
+                                st.session_state.valuator.price_data = price_data
+                                st.session_state.valuator.financial_data = financial_data
+                                st.session_state.valuator.fundamentals = fundamentals
+                                st.session_state.valuator._clean_data()
+                                st.session_state.data_loaded = True
+                                
+                                st.success("✅ Data loaded from data/ directory!")
+                                st.info(f"📊 Price records: {len(price_data):,}")
+                                st.info(f"🏢 Companies loaded: {fundamentals['Symbol'].nunique()}")
+                                st.info(f"📂 Data source: Sample data")
+                                
+                                with st.spinner("Analyzing stocks..."):
+                                    results = st.session_state.valuator.analyze_all_stocks()
+                                    st.session_state.analysis_results = results
+                                    st.success("✅ Analysis complete!")
+                        else:
+                            st.error("""
+                            ❌ Sample data files not found!
+                            
+                            Please ensure you have one of these:
+                            1. **Sample data** in `data/sample_data/` directory with:
+                               - `nse_price_data.csv`
+                               - `nse_financial_data.csv`
+                               - `nse_fundamentals.csv`
+                            
+                            2. **OR** data files in `data/` directory with same names
+                            
+                            3. **OR** upload your own data files
+                            
+                            4. **OR** run `python create_sample_data.py` to generate sample data
+                            """)
+                except Exception as e:
+                    st.error(f"❌ Error loading sample data: {str(e)}")
+        
+        with col_upload:
+            st.subheader("📤 Upload Your Data")
+            st.markdown("""
+            Upload your own CSV/Excel files.
+            Ensure they follow the required format.
+            """)
         
         st.markdown("---")
-        st.header("📤 Upload Your Own Data")
         
-        # File uploaders
+        # File uploaders for custom data
         price_file = st.file_uploader("Upload Price Data", type=['csv', 'xlsx'], 
                                      help="CSV or Excel with columns: Date, Symbol, Open, High, Low, Close, Volume")
         financial_file = st.file_uploader("Upload Financial Data", type=['csv', 'xlsx'],
@@ -619,11 +704,12 @@ def main():
                                            help="CSV or Excel with columns: Symbol, Name, Sector, Market_Cap, etc.")
         
         if price_file and financial_file and fundamentals_file:
-            if st.button("🚀 Load & Analyze Data"):
-                with st.spinner("Loading and analyzing data..."):
+            if st.button("🚀 Load & Analyze Uploaded Data", key="load_uploaded", use_container_width=True):
+                with st.spinner("Loading and analyzing uploaded data..."):
                     success = st.session_state.valuator.load_data(price_file, financial_file, fundamentals_file)
                     if success:
                         st.session_state.data_loaded = True
+                        st.session_state.data_source = 'uploaded'
                         results = st.session_state.valuator.analyze_all_stocks()
                         st.session_state.analysis_results = results
                         st.success("✅ Analysis complete!")
@@ -636,9 +722,77 @@ def main():
         growth_rate = st.slider("Growth Rate (%)", 0.0, 15.0, 5.0, 0.5) / 100
         discount_rate = st.slider("Discount Rate (%)", 5.0, 20.0, 12.0, 0.5) / 100
         
-        # Update DCF parameters
+        # Update DCF parameters in valuator
+        original_dcf = st.session_state.valuator.dcf_valuation
         st.session_state.valuator.dcf_valuation = lambda symbol, gr=growth_rate, dr=discount_rate, years=5: \
-            NSEStockValuator.dcf_valuation(st.session_state.valuator, symbol, gr, dr, years)
+            original_dcf(symbol, gr, dr, years)
+        
+        st.markdown("---")
+        st.header("🛠️ Setup")
+        
+        # Create sample data directory button
+        if st.button("📁 Create Sample Data Directory Structure", key="create_sample_dir"):
+            created, sample_dir = create_sample_data_structure()
+            if created:
+                st.success(f"✅ Created sample data directory: {sample_dir}")
+                st.info("📝 Run `python create_sample_data.py` to generate full sample data")
+            else:
+                st.info(f"📁 Sample data directory already exists: {sample_dir}")
+                
+                # Check if files exist
+                files = ['nse_price_data.csv', 'nse_financial_data.csv', 'nse_fundamentals.csv']
+                existing_files = []
+                
+                for filename in files:
+                    filepath = os.path.join(sample_dir, filename)
+                    if os.path.exists(filepath):
+                        existing_files.append(filename)
+                
+                if existing_files:
+                    st.success(f"✅ Found {len(existing_files)} sample data file(s)")
+                    for f in existing_files:
+                        st.write(f"  - {f}")
+                else:
+                    st.warning("⚠️ No sample data files found in the directory")
+                    st.info("📝 Run `python create_sample_data.py` to generate full sample data")
+        
+        # Run sample data generation
+        if st.button("🔄 Generate Sample Data", key="generate_sample_data"):
+            try:
+                # Check if create_sample_data.py exists
+                if os.path.exists('create_sample_data.py'):
+                    import subprocess
+                    with st.spinner("Generating sample data..."):
+                        result = subprocess.run(['python', 'create_sample_data.py'], capture_output=True, text=True)
+                        if result.returncode == 0:
+                            st.success("✅ Sample data generated successfully!")
+                            st.code(result.stdout)
+                        else:
+                            st.error(f"❌ Error generating sample data:\n{result.stderr}")
+                else:
+                    st.error("""
+                    ❌ `create_sample_data.py` not found!
+                    
+                    Please ensure you have the `create_sample_data.py` script in the same directory as `app.py`.
+                    """)
+            except Exception as e:
+                st.error(f"❌ Error running sample data generation: {str(e)}")
+        
+        st.markdown("---")
+        st.header("🔄 Data Management")
+        
+        if st.button("🗑️ Clear Current Data", key="clear_data"):
+            st.session_state.data_loaded = False
+            st.session_state.analysis_results = None
+            st.session_state.data_source = None
+            st.session_state.valuator = NSEStockValuator()  # Reset the valuator
+            st.rerun()
+        
+        # Display current status
+        if st.session_state.data_source:
+            st.info(f"**Current Data:** {st.session_state.data_source.upper()}")
+        else:
+            st.info("**Current Data:** No data loaded")
         
         st.markdown("---")
         st.info("""
@@ -663,18 +817,18 @@ def main():
             
             **How to use this app:**
             
-            1. **Prepare your data** using the templates in the `templates/` directory
-            2. **Place your data files** in the `data/` directory OR upload them using the sidebar
-            3. **Configure analysis settings** in the sidebar
-            4. **Click 'Load & Analyze Data'** to start analysis
+            1. **📁 Prepare sample data** by clicking "Generate Sample Data" in the sidebar
+            2. **📤 OR upload your own data** using the file uploaders in the sidebar
+            3. **⚙️ Configure analysis settings** (DCF parameters, etc.)
+            4. **🚀 Click 'Load & Analyze'** to start analysis
             
             **Features included:**
-            - Fundamental analysis (P/E, P/B, Dividend Yield)
-            - Technical analysis (RSI, MACD, Moving Averages)
-            - Discounted Cash Flow (DCF) valuation
-            - Sector-based analysis
-            - Excel report generation
-            - Buy/Sell/Hold recommendations
+            - 📊 Fundamental analysis (P/E, P/B, Dividend Yield)
+            - 📈 Technical analysis (RSI, MACD, Moving Averages)
+            - 💰 Discounted Cash Flow (DCF) valuation
+            - 🏢 Sector-based analysis
+            - 📥 Excel report generation
+            - 🎯 Buy/Sell/Hold recommendations
             """)
         
         with col2:
@@ -689,15 +843,35 @@ def main():
             st.markdown("**Top Sectors:**")
             for sector, count in top_sectors:
                 st.write(f"- {sector}: {count} companies")
+            
+            # Show data status
+            st.markdown("### 📂 Data Status")
+            if os.path.exists('data/sample_data'):
+                st.success("✅ Sample data directory exists")
+            else:
+                st.warning("⚠️ Sample data directory not found")
+            
+            if os.path.exists('create_sample_data.py'):
+                st.success("✅ Sample data script available")
+            else:
+                st.warning("⚠️ Sample data script not found")
         
         st.markdown("---")
         st.warning("""
         ⚠️ **Please load data first** using one of the options in the sidebar:
-        1. Click "Use Sample Data from data/ directory" if you have data in the data/ folder
-        2. OR upload your own CSV/Excel files using the uploaders
+        
+        1. **🎯 Try Sample Data**: Click "Generate Sample Data" then "Load Sample Data"
+        2. **📤 Upload Your Own Data**: Use the file uploaders below the sample data option
+        3. **🛠️ Setup**: Use the setup tools if you need to create directories
         """)
         
     else:
+        # Display data source banner at the top
+        if st.session_state.data_source == 'sample':
+            st.success("🎯 **Currently analyzing: SAMPLE DATA** - This is demonstration data from the sample_data directory.")
+        elif st.session_state.data_source == 'uploaded':
+            st.success("📤 **Currently analyzing: YOUR UPLOADED DATA** - This is your custom data.")
+        
         # Analysis results tabs
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "📋 Summary", "🔍 Stock Analysis", "📊 Sector View", "📈 Charts", "📥 Export"
@@ -1013,7 +1187,7 @@ def main():
                     fig_sector.update_layout(height=500)
                     st.plotly_chart(fig_sector, use_container_width=True)
                     
-                    # Sector details table - FIXED: Removed background_gradient
+                    # Sector details table
                     st.dataframe(
                         sector_analysis,
                         use_container_width=True
